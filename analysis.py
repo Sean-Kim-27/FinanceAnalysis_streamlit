@@ -39,6 +39,7 @@ def get_sentiment_label(score):
         return "Neutral (중립)"
 
 
+# 캐싱은 굳이 필요 없지만 가볍게 처리
 def validate_ticker(ticker):
     try:
         stock = yf.Ticker(ticker)
@@ -58,9 +59,12 @@ def validate_crypto_ticker(ticker):
 
 
 # ==========================================
-# 2. 데이터 수집
+# 2. 데이터 수집 (★ 여기에 캐싱 추가함!)
 # ==========================================
+# ttl=600 : 600초(10분) 동안은 데이터 재사용함. (API 호출 아낌)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_data_stock(ticker):
+    # 뉴스
     rss_url = f"https://news.google.com/rss/search?q={ticker}+stock&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
 
@@ -77,6 +81,7 @@ def get_data_stock(ticker):
         })
     news_df = pd.DataFrame(news_list)
 
+    # 주가 정보
     stock = yf.Ticker(ticker)
     info = stock.info
     curr = info.get('currentPrice') or info.get('regularMarketPrice') or 0
@@ -93,6 +98,7 @@ def get_data_stock(ticker):
     return news_df, stock_info
 
 
+@st.cache_data(ttl=600, show_spinner=False)
 def get_data_crypto(ticker):
     rss_url = f"https://news.google.com/rss/search?q={ticker}+crypto&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
@@ -128,17 +134,16 @@ def get_data_crypto(ticker):
 
 
 # ==========================================
-# 3. Gemini AI 분석 (★ 모델 3단 변신 로직)
+# 3. Gemini AI 분석
 # ==========================================
+# AI 분석 결과는 캐싱하지 않음 (사용자가 다시 누르면 새로운 분석을 원할 수도 있으니)
 def get_ai_analysis(api_keys_list, market_info, news_df):
-    # 1. 우선순위 모델 리스트 정의 (순서 중요)
     candidate_models = [
-        "gemini-2.5-flash",  # 1순위
-        "gemini-2.5-flash-lite",  # 2순위
-        "gemini-3-flash"  # 3순위 (미래 or 고성능)
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash"
     ]
 
-    # 2. 프롬프트 미리 구성 (모델 돌릴 때마다 만들면 낭비니까)
     news_txt = "\n".join([f"- {r['title']} ({r['sentiment_label']})" for _, r in
                           news_df.iterrows()]) if not news_df.empty else "뉴스 없음"
 
@@ -164,26 +169,20 @@ def get_ai_analysis(api_keys_list, market_info, news_df):
     '{point}' 중점 심층 분석. 결론(매수/매도/관망) 도출. 언어는 한국어, 마크다운 형식으로 출력. 데이터에 근거하여 날카롭게 분석.
     """
 
-    # 3. [키 순회] -> [모델 순회] 이중 루프
     for i, key in enumerate(api_keys_list):
         for model_name in candidate_models:
             try:
-                # 키 설정 및 모델 생성
                 genai.configure(api_key=key)
                 model = genai.GenerativeModel(model_name)
-
-                # 시도
                 response = model.generate_content(prompt)
 
-                # 성공 시 바로 리턴 (함수 종료)
-                return response.text
+                # ★ 여기가 중요함: 어떤 모델이 성공했는지 같이 리턴해줌
+                return f"🤖 **사용된 모델:** `{model_name}` (Key #{i + 1})\n\n" + response.text
 
             except Exception as e:
-                # 실패 로그 찍고 continue (다음 모델 or 다음 키로 넘어감)
                 print(f"Key #{i + 1} | Model '{model_name}' Fail: {e}")
                 continue
 
-    # 모든 키와 모델이 다 실패했을 때
     return f"🤯 모든 키가 전사했거나, 모델들({candidate_models})을 찾을 수 없다."
 
 
@@ -210,14 +209,16 @@ st.markdown("""
 
 st.title("🤖 AI 투자 분석 리포트")
 st.caption(f"🔑 로드된 API 키: {len(API_KEYS)}개 | Models: 2.5-flash -> lite -> 3-flash")
-st.caption("Made by sean-kim-27 | Powered by Gemini | 본 자료는 참고용이므로, 투자 시 발생하는 문제는 본인의 책임입니다. ")
+st.caption("Made by sean-kim-27 | Powered by Gemini | 본 자료는 참고용이므로, 투자 시 발생하는 문제는 본인의 책임입니다.")
 
 tab_stock, tab_crypto = st.tabs(["📉 주식", "🪙 암호화폐"])
 
+# ----------------- 주식 탭 -----------------
 with tab_stock:
     e_stock = st.empty()
     c1, c2 = st.columns([4, 1])
     ticker = c1.text_input("티커 (예: TSLA)", "TSLA", key="s_in", label_visibility="collapsed")
+
     if c2.button("분석", key="s_btn", use_container_width=True):
         if not ticker:
             e_stock.markdown('<div class="bubble">입력해라.</div>', unsafe_allow_html=True)
@@ -225,7 +226,8 @@ with tab_stock:
             e_stock.markdown(f'<div class="bubble">\'{ticker}\' 없다.</div>', unsafe_allow_html=True)
         else:
             e_stock.empty()
-            with st.spinner("분석 중..."):
+            with st.spinner("데이터 수집 & AI 분석 중..."):
+                # 캐싱 덕분에 두 번째부터는 개빠름
                 df, info = get_data_stock(ticker)
                 rpt = get_ai_analysis(API_KEYS, info, df)
 
@@ -235,14 +237,19 @@ with tab_stock:
                 m2.metric("목표가", f"${info['target_price']}")
                 m3.metric("PER", info['pe_ratio'])
                 m4.metric("의견", info['recommendation'])
+
                 st.subheader(f"📝 {info['ticker']} 리포트")
                 st.markdown(rpt)
-                with st.expander("뉴스"): st.dataframe(df[['date', 'title', 'sentiment_label', 'url']], hide_index=True)
 
+                with st.expander("뉴스"):
+                    st.dataframe(df[['date', 'title', 'sentiment_label', 'url']], hide_index=True)
+
+# ----------------- 코인 탭 -----------------
 with tab_crypto:
     e_crypto = st.empty()
     c1, c2 = st.columns([4, 1])
     c_ticker = c1.text_input("코인 (예: BTC)", "BTC", key="c_in", label_visibility="collapsed")
+
     if c2.button("분석", key="c_btn", use_container_width=True):
         if not c_ticker:
             e_crypto.markdown('<div class="bubble">입력해라.</div>', unsafe_allow_html=True)
@@ -252,7 +259,8 @@ with tab_crypto:
                 e_crypto.markdown(f'<div class="bubble">\'{c_ticker}\' 없다.</div>', unsafe_allow_html=True)
             else:
                 e_crypto.empty()
-                with st.spinner("분석 중..."):
+                with st.spinner("데이터 수집 & AI 분석 중..."):
+                    # 여기도 캐싱 적용됨
                     df, info = get_data_crypto(real_t)
                     rpt = get_ai_analysis(API_KEYS, info, df)
 
@@ -262,7 +270,9 @@ with tab_crypto:
                     k2.metric("시가총액", f"${info['market_cap']:,}")
                     k3.metric("거래량", f"${info['volume']:,}")
                     k4.metric("유통량", f"{info['circulating_supply']:,}")
+
                     st.subheader(f"🪙 {info['ticker']} 리포트")
                     st.markdown(rpt)
-                    with st.expander("뉴스"): st.dataframe(df[['date', 'title', 'sentiment_label', 'url']],
-                                                         hide_index=True)
+
+                    with st.expander("뉴스"):
+                        st.dataframe(df[['date', 'title', 'sentiment_label', 'url']], hide_index=True)
