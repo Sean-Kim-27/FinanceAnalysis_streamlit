@@ -227,6 +227,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🤖 AI 주식 분석 리포트")
+st.caption("Copyright © Made by sean-kim-27 (github) | Powered by Gemini | ⚠️ 투자는 본인의 선택이며 책임은 지지 않습니다.")
 
 # ★ 여기가 중요함: 에러 메시지가 뜰 공간(Placeholder)을 미리 잡아둠
 error_placeholder = st.empty()
@@ -310,7 +311,7 @@ st.markdown(
     }
     </style>
     <div class="footer">
-        <p>Copyright © Made by sean-kim-27 (github) | Powered by Gemini | ⚠️ 투자는 본인의 선택이며 책임은 지지 않습니다.</p>
+        <p></p>
     </div>
     """,
     unsafe_allow_html=True
