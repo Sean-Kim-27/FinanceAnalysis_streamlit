@@ -210,6 +210,7 @@ st.markdown("""
 
 st.title("🤖 AI 투자 분석 리포트")
 st.caption(f"🔑 로드된 API 키: {len(API_KEYS)}개 | Models: 2.5-flash -> lite -> 3-flash")
+st.caption("Made by sean-kim-27 | Powered by Gemini | 본 자료는 참고용이므로, 투자 시 발생하는 문제는 본인의 책임입니다. ")
 
 tab_stock, tab_crypto = st.tabs(["📉 주식", "🪙 암호화폐"])
 
